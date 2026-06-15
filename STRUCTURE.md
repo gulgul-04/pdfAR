@@ -19,7 +19,7 @@ pdfAR/
 │       ├── __init__.py
 │       ├── config.py              # Centralized thresholds (Confidence scores, pixel tolerances)
 │       ├── schema.py              # Pydantic models for FastAPI Request/Response validation
-│       ├── models.py              # Internal business logic models and data classes
+│       ├── file_handler.py        # Manages asynchronous OS-level file I/O
 │       ├── geometry.py            # Spatial math: bounding boxes, rotation matrices, intersections
 │       ├── extractor.py           # PyMuPDF: Extracts annotations, context, and metadata
 │       ├── matcher.py             # RapidFuzz: Calculates string similarity and confidence
