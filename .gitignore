@@ -1,0 +1,19 @@
+# Python Backend
+backend/venv/
+backend/__pycache__/
+*.pyc
+.env
+
+# React/Node Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Client Data and Local Testing (Critical)
+test_docs/
+backend/test_docs/
+*.pdf
+*.xfdf
+*.fdf
+
+# OS generated files
+.DS_Store
