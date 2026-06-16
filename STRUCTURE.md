@@ -13,6 +13,7 @@ pdfAR/
 │   ├── requirements.txt
 │   ├── venv/                      # Isolated Python environment
 │   ├── main.py                    # FastAPI application and route definitions
+    ├── test_pipeline.py
 │   ├── test_docs/                 # Local sandbox for PDF testing (Git Ignored)
 │   │
 │   └── engine/                    # Core PDF Processing Logic
