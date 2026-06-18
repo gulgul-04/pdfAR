@@ -1,10 +1,17 @@
 import fitz
 from rapidfuzz import fuzz
 from .schemas import MatchedAnnotation
+import re
+
+def clean_str(text: str) -> str:
+    cleaned = re.sub(r'[^\w\s]', '', text).strip().lower()
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned
 
 def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path: str, output_path: str) -> str:
     # takes matched annotations and physically writes them into the final pdf. 
     doc = fitz.open(edited_pdf_path)
+
     for annot in matched_annots:
         # Skip failed matches or items waiting in manual review queue
         if annot.new_page is None or annot.confidence_score < 85.0:
@@ -20,6 +27,7 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                 new_annot = page.add_text_annot((rect_tuple[0], rect_tuple[1]), annot.comment_text)
             # Strategy 2: Semantic Injection
             else:
+                # Try exact visual search
                 text_instances = page.search_for(annot.anchor_text)
 
                 if text_instances:
@@ -28,12 +36,16 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                         new_annot = page.add_highlight_annot(target_rect)
                     else:
                         new_annot = page.add_text_annot((target_rect.x0 - 20, target_rect.y0), annot.comment_text)
+                
+                # Spatial Fuzzy Fallback
                 else:
                     blocks = page.get_text("blocks")
                     best_block = None
                     best_block_score = 0
+                    # Use complete context window if available
                     search_string = annot.context_window if annot.context_window else annot.anchor_text
 
+                    # Find correct paragraph block
                     for b in blocks:
                         if b[6] != 0:
                             continue
@@ -46,24 +58,30 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                             best_block = b
 
                     if best_block and best_block_score > 60:
+                        # Find specific word inside the block
                         block_rect = fitz.Rect(best_block[:4])
                         all_words = page.get_text("words")
 
                         block_words = [w for w in all_words if fitz.Rect(w[:4]).intersects(block_rect)]
                         block_words.sort(key=lambda w: (w[1], w[0]))
 
-                        anchor_word_count = len(annot.anchor_text.split())
+                        clean_anchor = clean_str(annot.anchor_text)
+
+                        anchor_word_count = len(clean_anchor.split())
                         best_phrase_score = 0
                         target_rect = block_rect
 
+                        # Slide window using cleaned text phrase comparision
                         for window_size in [anchor_word_count - 1, anchor_word_count, anchor_word_count + 1]:
                             if window_size <= 0:
                                 continue
+
                             for i in range(len(block_words) - window_size + 1):
                                 window = block_words[i : i + window_size]
                                 window_text = " ".join([w[4] for w in window])
+                                clean_window = clean_str(window_text)
 
-                                phrase_score = fuzz.ratio(annot.anchor_text, window_text)
+                                phrase_score = fuzz.ratio(clean_anchor, clean_window)
 
                                 if phrase_score > best_phrase_score:
                                     best_phrase_score = phrase_score
