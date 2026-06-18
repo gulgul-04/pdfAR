@@ -3,7 +3,7 @@ import os
 
 def create_test_pdf():
     print("Generating test PDFs...")
-    os.makedirs("test_docs", exists_ok=True)
+    os.makedirs("test_docs", exist_ok=True)
 
     # 1. Geneerate Original PDF
     doc_orig = fitz.open()

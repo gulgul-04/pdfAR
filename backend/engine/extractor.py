@@ -38,7 +38,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
             mod_date = annot.info.get("modDate", "")
             comment_text = annot.info.get("content", "").strip()
 
-            parent_id = annot.irt_xref
+            parent_id = str(annot.irt_xref) if annot.irt_xref > 0 else None
 
             highlighted_text = ""
             context_window = ""
@@ -86,7 +86,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
                 end_idx = start_idx + len(highlighted_text)
                 prefix = normalized_page_text[max(0, start_idx - 50):start_idx]
                 suffix = normalized_page_text[end_idx:end_idx + 50]
-                context_window = f"{prefix} {highlighted_text} {suffix}"
+                context_window = f"{prefix}{highlighted_text}{suffix}"
 
             elif anchor_strategy == "image_caption":
                 # Fallback context to be handled by geometry caption search later
@@ -100,7 +100,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
                 
             #Append structure object
             extracted_annots.append({
-                "id": annot.id,
+                "id": str(annot.xref),
                 "parent_id": parent_id,
                 "type": ANNOT_TYPES[annot_type_int],
                 "page": page_num,

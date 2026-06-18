@@ -23,6 +23,8 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
                 type=annot.type,
                 confidence_score=100.0,
                 match_reason="Relative Geometric Anchor",
+                anchor_text=annot.anchor_text,
+                context_window=annot.context_window,
                 new_page=annot.page,
                 new_coordinates=annot.coordinates,
                 metadata=annot.metadata,
@@ -49,10 +51,38 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
                 if not page_text:
                     continue
 
-                score = fuzz.partial_ratio(target_search_string, page_text)
+                score = 0
+
+                # Try full context window : Prefix + Anchor + Suffix
+                if annot.context_window: 
+                    score = fuzz.partial_ratio(annot.context_window, page_text)
+
+                # Try 'half contexts' by comparing with suffix and prefix
+                if score < 80.0 and annot.anchor_text in annot.context_window:
+                    try: 
+                        prefix, suffix = annot.context_window.split(annot.anchor_text, 1)
+                        
+                        left_context = f"{prefix}{annot.anchor_text}"
+                        score_left = fuzz.partial_ratio(left_context, page_text)
+
+                        rigth_context = f"{annot.anchor_text}{suffix}"
+                        score_right = fuzz.partial_ratio(rigth_context, page_text)
+
+                        score = max(score, score_left, score_right)
+                    except ValueError:
+                        pass # Failsafe if the split acts weirdly, just rely on the base score. 
+
+                # Last Resort: just the anchor text - score is penalized and forces for a manual review
+                if score < 60.0 and annot.anchor_text:
+                    score_anchor = fuzz.partial_ratio(annot.anchor_text, page_text)
+                    if score_anchor > 80.0:
+                        score_anchor = 75.0
+                    score = max(score, score_anchor)
+
                 if score > best_score:
                     best_score = score
                     best_page = page_num
+
 
         # Confidence Routing
         if best_score >= MIN_CONFIDENCE_AUTO:
@@ -68,6 +98,8 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
             type=annot.type,
             confidence_score=round(best_score, 2),
             match_reason=reason,
+            anchor_text=annot.anchor_text,
+            context_window=annot.context_window,
             new_page=best_page,
             metadata=annot.metadata,
             comment_text=annot.comment_text

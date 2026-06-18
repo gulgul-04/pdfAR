@@ -31,6 +31,8 @@ class MatchedAnnotation(BaseModel):
     type: str
     confidence_score: float = Field(..., ge=0.0, le=100.0)
     match_reason: str
+    anchor_text: str
+    context_window: str
 
     new_page: Optional[int] = None
     new_coordinates: Optional[Coordinates] = None

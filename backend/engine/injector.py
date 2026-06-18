@@ -1,0 +1,102 @@
+import fitz
+from rapidfuzz import fuzz
+from .schemas import MatchedAnnotation
+
+def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path: str, output_path: str) -> str:
+    # takes matched annotations and physically writes them into the final pdf. 
+    doc = fitz.open(edited_pdf_path)
+    for annot in matched_annots:
+        # Skip failed matches or items waiting in manual review queue
+        if annot.new_page is None or annot.confidence_score < 85.0:
+            continue
+
+        page = doc[annot.new_page]
+
+        try:
+            # Strategy 1: Gemoetric Injection
+            if annot.match_reason == "Relative Geometric Anchor" and annot.new_coordinates:
+                # Using raw Coordinates
+                rect_tuple = (annot.new_coordinates.x0, annot.new_coordinates.y0, annot.new_coordinates.x1, annot.new_coordinates.y1)
+                new_annot = page.add_text_annot((rect_tuple[0], rect_tuple[1]), annot.comment_text)
+            # Strategy 2: Semantic Injection
+            else:
+                text_instances = page.search_for(annot.anchor_text)
+
+                if text_instances:
+                    target_rect = text_instances[0]
+                    if annot.type == "Higlight":
+                        new_annot = page.add_highlight_annot(target_rect)
+                    else:
+                        new_annot = page.add_text_annot((target_rect.x0 - 20, target_rect.y0), annot.comment_text)
+                else:
+                    blocks = page.get_text("blocks")
+                    best_block = None
+                    best_block_score = 0
+                    search_string = annot.context_window if annot.context_window else annot.anchor_text
+
+                    for b in blocks:
+                        if b[6] != 0:
+                            continue
+
+                        block_text = b[4].replace("\n", " ")
+                        score = fuzz.partial_ratio(search_string, block_text)
+
+                        if score > best_block_score:
+                            best_block_score = score
+                            best_block = b
+
+                    if best_block and best_block_score > 60:
+                        block_rect = fitz.Rect(best_block[:4])
+                        all_words = page.get_text("words")
+
+                        block_words = [w for w in all_words if fitz.Rect(w[:4]).intersects(block_rect)]
+                        block_words.sort(key=lambda w: (w[1], w[0]))
+
+                        anchor_word_count = len(annot.anchor_text.split())
+                        best_phrase_score = 0
+                        target_rect = block_rect
+
+                        for window_size in [anchor_word_count - 1, anchor_word_count, anchor_word_count + 1]:
+                            if window_size <= 0:
+                                continue
+                            for i in range(len(block_words) - window_size + 1):
+                                window = block_words[i : i + window_size]
+                                window_text = " ".join([w[4] for w in window])
+
+                                phrase_score = fuzz.ratio(annot.anchor_text, window_text)
+
+                                if phrase_score > best_phrase_score:
+                                    best_phrase_score = phrase_score
+
+                                    # Calculate custom bounding box containing just these words
+                                    x0 = min([w[0] for w in window])
+                                    y0 = min([w[1] for w in window])
+                                    x1 = min([w[2] for w in window])
+                                    y1 = min([w[3] for w in window])
+                                    target_rect = fitz.Rect(x0, y0, x1, y1)
+
+                        if annot.type == "Highlight":
+                            new_annot = page.add_highlight_annot(target_rect)
+                        else:
+                            new_annot = page.add_text_annot((target_rect.x0 - 20, target_rect.y0), annot.comment_text)
+
+                    else: 
+                        new_annot = page.add_text_annot((50, 50), annot.comment_text)
+
+
+            # Preserve Chain of Custody
+            new_annot.set_info({
+                "title": annot.metadata.author,
+                "content": annot.comment_text,
+                "creationDate": annot.metadata.creation_date,
+                "modData":annot.metadata.modification_date
+            })
+            new_annot.update()
+
+        except Exception as e:
+            print(f"Warning: Failed to inject comment '{annot.comment_text}' - {e}")
+            continue
+
+    doc.save(output_path)
+    doc.close()
+    return output_path
