@@ -1,18 +1,10 @@
 import fitz
+from .config import EngineConfig
 
 def extract_annotations(pdf_path: str) -> list[dict]:
 
     doc = fitz.open(pdf_path)
     extracted_annots = []
-
-    ANNOT_TYPES = {
-        "Text": "Sticky Note", 
-        "FreeText": "FreeText Margin", 
-        "Square": "Square/Table Highlights",
-        "Highlight": "Highlight", 
-        "Redact": "Redaction", 
-        "Caret": "Insertion Caret"
-    }
 
     for page_num in range(len(doc)):
         page = doc[page_num]
@@ -26,7 +18,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
 
         for annot in page.annots():
             annot_subtype = annot.type[1]
-            if annot_subtype not in ANNOT_TYPES:
+            if annot_subtype not in EngineConfig.ANNOT_SUBTYPE_MAPPING:
                 continue
             
             true_rect = annot.rect * derotation_matrix
@@ -69,7 +61,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
                         break
                 
                 if not is_image_anchor:
-                    same_line_words = [w for w in words_with_coords if abs(w[1] - true_rect.y0) < 15]
+                    same_line_words = [w for w in words_with_coords if abs(w[1] - true_rect.y0) < EngineConfig.Y_AXIS_TOLERANCE]
                     if same_line_words:
                         same_line_words.sort(key=lambda w: w[0])
                         highlighted_text = same_line_words[0][4]
@@ -82,8 +74,8 @@ def extract_annotations(pdf_path: str) -> list[dict]:
             if anchor_strategy == "semantic_text" and highlighted_text and highlighted_text in normalized_page_text:
                 start_idx = normalized_page_text.find(highlighted_text)
                 end_idx = start_idx + len(highlighted_text)
-                prefix = normalized_page_text[max(0, start_idx - 50):start_idx]
-                suffix = normalized_page_text[end_idx:end_idx + 50]
+                prefix = normalized_page_text[max(0, start_idx - EngineConfig.CONTEXT_WINDOW_SIZE):start_idx]
+                suffix = normalized_page_text[end_idx:end_idx + EngineConfig.CONTEXT_WINDOW_SIZE]
                 context_window = f"{prefix}{highlighted_text}{suffix}"
 
             elif anchor_strategy == "image_caption":
@@ -100,7 +92,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
             extracted_annots.append({
                 "id": str(annot.xref),
                 "parent_id": parent_id,
-                "type": ANNOT_TYPES[annot_subtype],
+                "type": EngineConfig.ANNOT_SUBTYPE_MAPPING[annot_subtype],
                 "page": page_num,
                 "strategy": anchor_strategy,
                 "coordinates": {

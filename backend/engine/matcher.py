@@ -1,9 +1,7 @@
 import fitz
 from rapidfuzz import fuzz
 from .schemas import ExtractedAnnotation, MatchedAnnotation, Coordinates
-
-MIN_CONFIDENCE_AUTO = 85.0
-MIN_CONFIDENCE_REVIEW = 60.0
+from .config import EngineConfig
 
 def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_path: str) -> list[MatchedAnnotation]:
     # Searches edited PDF for the semantic anchors of the orignal annotations.
@@ -73,7 +71,7 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
                         pass # Failsafe if the split acts weirdly, just rely on the base score. 
 
                 # Last Resort: just the anchor text - score is penalized and forces for a manual review
-                if score < 60.0 and annot.anchor_text:
+                if score < EngineConfig.MIN_CONFIDENCE_REVIEW and annot.anchor_text:
                     score_anchor = fuzz.partial_ratio(annot.anchor_text, page_text)
 
                     if len(annot.anchor_text.split()) < 3:
@@ -89,9 +87,9 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
 
 
         # Confidence Routing
-        if best_score >= MIN_CONFIDENCE_AUTO:
+        if best_score >= EngineConfig.MIN_CONFIDENCE_AUTO:
             reason = "Exact Text Match" if best_score == 100.0 else "High Confidence Fuzzy Match"
-        elif best_score >= MIN_CONFIDENCE_REVIEW:
+        elif best_score >= EngineConfig.MIN_CONFIDENCE_REVIEW:
             reason = "Needs Manual Review (Text Heavily Altered)"
         else:
             reason = "Failed to Locate Anchor"

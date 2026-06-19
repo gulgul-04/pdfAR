@@ -2,6 +2,7 @@ import fitz
 from rapidfuzz import fuzz
 from .schemas import MatchedAnnotation
 import re
+from .config import EngineConfig
 
 def clean_str(text: str) -> str:
     cleaned = re.sub(r'[^\w\s]', '', text).strip().lower()
@@ -14,7 +15,7 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
 
     for annot in matched_annots:
         # Skip failed matches or items waiting in manual review queue
-        if annot.new_page is None or annot.confidence_score < 40.0:
+        if annot.new_page is None or annot.confidence_score < EngineConfig.MIN_CONFIDENCE_AUTO:
             continue
 
         page = doc[annot.new_page]
@@ -38,7 +39,12 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                         new_annot = page.add_redact_annot(target_rect)
                         new_annot.set_colors(stroke=(1, 0, 0))
                     elif annot.type == "Square/Table Highlights":
-                        expanded = fitz.Rect(target_rect.x0 - 5, target_rect.y0 - 5, target_rect.x1 + 5, target_rect.y1 + 5)
+                        expanded = fitz.Rect(
+                            target_rect.x0 - EngineConfig.X_AXIS_PADDING, 
+                            target_rect.y0 - EngineConfig.Y_AXIS_PADDING, 
+                            target_rect.x1 + EngineConfig.X_AXIS_PADDING, 
+                            target_rect.y1 + EngineConfig.Y_AXIS_PADDING
+                        )
                         new_annot = page.add_rect_annot(expanded)
                         new_annot.set_colors(stroke=(1, 0, 0))
                     else:
@@ -64,7 +70,7 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                             best_block_score = score
                             best_block = b
 
-                    if best_block and best_block_score > 60:
+                    if best_block and best_block_score > EngineConfig.MIN_CONFIDENCE_REVIEW:
                         # Find specific word inside the block
                         block_rect = fitz.Rect(best_block[:4])
                         all_words = page.get_text("words")
@@ -106,7 +112,12 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                             new_annot = page.add_redact_annot(target_rect)
                             new_annot.set_colors(stroke=(1, 0, 0))
                         elif annot.type == "Square/Table Highlights":
-                            expanded = fitz.Rect(target_rect.x0 -5, target_rect.y0 -5, target_rect.x1 +5, target_rect.y1 + 5)
+                            expanded = fitz.Rect(
+                            target_rect.x0 - EngineConfig.X_AXIS_PADDING, 
+                            target_rect.y0 - EngineConfig.Y_AXIS_PADDING, 
+                            target_rect.x1 + EngineConfig.X_AXIS_PADDING, 
+                            target_rect.y1 + EngineConfig.Y_AXIS_PADDING
+                        )
                             new_annot = page.add_rect_annot(expanded)
                             new_annot.set_colors(stroke=(1, 0, 0))
                         elif annot.type == "Insertion Caret":
