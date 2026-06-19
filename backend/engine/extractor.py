@@ -6,19 +6,17 @@ def extract_annotations(pdf_path: str) -> list[dict]:
     extracted_annots = []
 
     ANNOT_TYPES = {
-        0: "Sticky Note",
-        2: "FreeText Margin",
-        4: "Square/Table Highlights",
-        8: "Highlight",
-        11: "Redaction",
-        14: "Insertion Caret"
+        "Text": "Sticky Note", 
+        "FreeText": "FreeText Margin", 
+        "Square": "Square/Table Highlights",
+        "Highlight": "Highlight", 
+        "Redact": "Redaction", 
+        "Caret": "Insertion Caret"
     }
 
     for page_num in range(len(doc)):
         page = doc[page_num]
-
-        page_text = page.get_text("text")
-        normalized_page_text = " ".join(page_text.split())
+        normalized_page_text = " ".join(page.get_text("text").split())
         words_with_coords = page.get_text("words")
 
         image_list = page.get_images(full=True)
@@ -27,12 +25,11 @@ def extract_annotations(pdf_path: str) -> list[dict]:
         derotation_matrix = page.rotation_matrix
 
         for annot in page.annots():
-            annot_type_int = annot.type[0]
-            if annot_type_int not in ANNOT_TYPES:
+            annot_subtype = annot.type[1]
+            if annot_subtype not in ANNOT_TYPES:
                 continue
             
             true_rect = annot.rect * derotation_matrix
-
             author = annot.info.get("title", "Unknown")
             creation_date = annot.info.get("creationDate", "")
             mod_date = annot.info.get("modDate", "")
@@ -45,11 +42,12 @@ def extract_annotations(pdf_path: str) -> list[dict]:
             anchor_strategy = "semantic_text" #default
 
             # Highlight and Redaction Annotations
-            if annot_type_int in [8, 11]:
-                highlighted_text = " ".join(page.get_text("text", clip=true_rect).split()).strip()
+            if annot_subtype in ["Highlight", "Redact"]:
+                intersecting_words = [w[4] for w in words_with_coords if fitz.Rect(w[:4]).intersects(true_rect)]
+                highlighted_text = " ".join(intersecting_words).strip()
 
             # Insertion Caret Annotations
-            elif annot_type_int == 14:
+            elif annot_subtype == "Caret":
                 closest_words = sorted(
                     words_with_coords,
                     key=lambda w: abs(w[1] - true_rect.y0) + abs(w[0] - true_rect.x0)
@@ -59,7 +57,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
                     highlighted_text = target_word if target_word in normalized_page_text else "[Insertion]"
 
             # Margin and square annotations    
-            elif annot_type_int in [0, 2, 4]:
+            elif annot_subtype in ["Text", "FreeText", "Square"]:
                 is_image_anchor = False
 
                 # Check if the annotation overlaps an image
@@ -102,7 +100,7 @@ def extract_annotations(pdf_path: str) -> list[dict]:
             extracted_annots.append({
                 "id": str(annot.xref),
                 "parent_id": parent_id,
-                "type": ANNOT_TYPES[annot_type_int],
+                "type": ANNOT_TYPES[annot_subtype],
                 "page": page_num,
                 "strategy": anchor_strategy,
                 "coordinates": {
@@ -119,5 +117,5 @@ def extract_annotations(pdf_path: str) -> list[dict]:
                 "context_window": context_window
             })
 
-        doc.close()
-        return extracted_annots
+    doc.close()
+    return extracted_annots

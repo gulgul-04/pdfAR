@@ -75,8 +75,12 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
                 # Last Resort: just the anchor text - score is penalized and forces for a manual review
                 if score < 60.0 and annot.anchor_text:
                     score_anchor = fuzz.partial_ratio(annot.anchor_text, page_text)
-                    if score_anchor > 80.0:
+
+                    if len(annot.anchor_text.split()) < 3:
+                        score_anchor = 0
+                    elif score_anchor > 80.0:
                         score_anchor = 75.0
+
                     score = max(score, score_anchor)
 
                 if score > best_score:

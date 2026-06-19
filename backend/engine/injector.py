@@ -14,7 +14,7 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
 
     for annot in matched_annots:
         # Skip failed matches or items waiting in manual review queue
-        if annot.new_page is None or annot.confidence_score < 85.0:
+        if annot.new_page is None or annot.confidence_score < 40.0:
             continue
 
         page = doc[annot.new_page]
@@ -32,8 +32,15 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
 
                 if text_instances:
                     target_rect = text_instances[0]
-                    if annot.type == "Higlight":
+                    if annot.type == "Highlight":
                         new_annot = page.add_highlight_annot(target_rect)
+                    elif annot.type == "Redaction":
+                        new_annot = page.add_redact_annot(target_rect)
+                        new_annot.set_colors(stroke=(1, 0, 0))
+                    elif annot.type == "Square/Table Highlights":
+                        expanded = fitz.Rect(target_rect.x0 - 5, target_rect.y0 - 5, target_rect.x1 + 5, target_rect.y1 + 5)
+                        new_annot = page.add_rect_annot(expanded)
+                        new_annot.set_colors(stroke=(1, 0, 0))
                     else:
                         new_annot = page.add_text_annot((target_rect.x0 - 20, target_rect.y0), annot.comment_text)
                 
@@ -89,12 +96,23 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                                     # Calculate custom bounding box containing just these words
                                     x0 = min([w[0] for w in window])
                                     y0 = min([w[1] for w in window])
-                                    x1 = min([w[2] for w in window])
-                                    y1 = min([w[3] for w in window])
+                                    x1 = max([w[2] for w in window])
+                                    y1 = max([w[3] for w in window])
                                     target_rect = fitz.Rect(x0, y0, x1, y1)
 
                         if annot.type == "Highlight":
                             new_annot = page.add_highlight_annot(target_rect)
+                        elif annot.type == "Redaction":
+                            new_annot = page.add_redact_annot(target_rect)
+                            new_annot.set_colors(stroke=(1, 0, 0))
+                        elif annot.type == "Square/Table Highlights":
+                            expanded = fitz.Rect(target_rect.x0 -5, target_rect.y0 -5, target_rect.x1 +5, target_rect.y1 + 5)
+                            new_annot = page.add_rect_annot(expanded)
+                            new_annot.set_colors(stroke=(1, 0, 0))
+                        elif annot.type == "Insertion Caret":
+                            new_annot = page.add_caret_annot(target_rect.top_left)
+                        elif annot.type == "FreeText Margin":
+                            new_annot = page.add_freetext_annot(target_rect, annot.comment_text)
                         else:
                             new_annot = page.add_text_annot((target_rect.x0 - 20, target_rect.y0), annot.comment_text)
 
@@ -107,7 +125,7 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                 "title": annot.metadata.author,
                 "content": annot.comment_text,
                 "creationDate": annot.metadata.creation_date,
-                "modData":annot.metadata.modification_date
+                "modDate":annot.metadata.modification_date
             })
             new_annot.update()
 
