@@ -52,4 +52,4 @@ class ProcessPDFResponse(BaseModel):
     auto_injected: List[MatchedAnnotation]
     review_queue: List[MatchedAnnotation]
 
-    download_token: Optional[str] = None
+    download_token: Optional[str] = None 
