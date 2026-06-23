@@ -2,18 +2,24 @@
 backend/venv/
 backend/__pycache__/
 *.pyc
-.env
+backend/.env
 
 # React/Node Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/.env
+frontend/.env.*
+.env
+.env.*
 
 # Client Data and Local Testing (Critical)
 test_docs/
 backend/test_docs/
+backend/temp_jobs
 *.pdf
 *.xfdf
 *.fdf
 
 # OS generated files
 .DS_Store
+Thumbs.db

@@ -28,6 +28,7 @@ class ExtractedAnnotation(BaseModel):
 
 class MatchedAnnotation(BaseModel):
     original_id: str
+    parent_id: Optional[str] = None
     type: str
     confidence_score: float = Field(..., ge=0.0, le=100.0)
     match_reason: str

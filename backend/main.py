@@ -1,9 +1,17 @@
 import os 
 import asyncio
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, status
+import html
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 from engine import file_handler, extractor, matcher, injector, schemas
 from engine.config import EngineConfig
+
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="PDF Annotation Restoration API",
@@ -11,15 +19,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
 # 1. Security: Strict CORS Middleware
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "https://myvercelapp" # Change when app is initialised
-]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=EngineConfig.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"]
@@ -28,9 +36,13 @@ app.add_middleware(
 # 2. Security: DOS Protection & Sanitization Constants
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024 # 50 MB limit
 ALLOWED_MIME_TYPE = "application/pdf"
+PDF_MAGIC_BYTES = b"%PDF-"
 
 async def validate_file(file: UploadFile, file_type_name: str):
-    if file.content_type != ALLOWED_MIME_TYPE:
+    header = await file.read(5)
+    await file.seek(0)
+
+    if header != PDF_MAGIC_BYTES:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             details=f"Security Violation: {file_type_name} must be a valid PDF document."
@@ -54,7 +66,9 @@ async def schedule_cleanup(job_dir: str, delay_seconds: int):
 
 # 4. Core Processing Endpoint
 @app.post("/api/v1/process-pdfs", response_model=schemas.ProcessPDFResponse)
+@limiter.limit(EngineConfig.API_RATE_LIMIT)
 async def process_pdfs(
+    request: Request,
     background_tasks: BackgroundTasks, 
     original_pdf: UploadFile = File(...),
     edited_pdf: UploadFile = File(...)
@@ -75,6 +89,13 @@ async def process_pdfs(
 
         await file_handler.save_uploaded_file(original_pdf, orig_path)
         await file_handler.save_uploaded_file(edited_pdf, edited_path)
+
+        import fitz
+        doc = fitz.open(orig_path)
+        if len(doc) > 500:
+            doc.close()
+            raise ValueError("Document exceeds the maximum allowed length of 500 pages.")
+        doc.close()
 
         # Step 4: Execute Engine Pipeline
         extracted_annots = extractor.extract_annotations(orig_path)
@@ -100,6 +121,9 @@ async def process_pdfs(
         review_queue = []
 
         for annot in matched_annots:
+            annot.comment_text = html.escape(annot.comment_text)
+            annot.anchor_text = html.escape(annot.anchor_text)
+
             if annot.confidence_score >= EngineConfig.MIN_CONFIDENCE_AUTO:
                 auto_injected.append(annot)
             else:
