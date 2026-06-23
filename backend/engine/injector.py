@@ -12,17 +12,23 @@ def clean_str(text: str) -> str:
 def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path: str, output_path: str) -> str:
     # takes matched annotations and physically writes them into the final pdf. 
     doc = fitz.open(edited_pdf_path)
+    xref_map = {}
+    sorted_annots = sorted(matched_annots, key=lambda x: x.parent_id is not None)
 
-    for annot in matched_annots:
+    for annot in sorted_annots:
         # Skip failed matches or items waiting in manual review queue
         if annot.new_page is None or annot.confidence_score < EngineConfig.MIN_CONFIDENCE_AUTO:
             continue
 
         page = doc[annot.new_page]
+        is_child_reply = annot.parent_id and annot.parent_id in xref_map
 
         try:
+            # Strategy 0: Child Replies
+            if is_child_reply:
+                new_annot = page.add_text_annot((0, 0), annot.comment_text)
             # Strategy 1: Gemoetric Injection
-            if annot.match_reason == "Relative Geometric Anchor" and annot.new_coordinates:
+            elif annot.match_reason == "Relative Geometric Anchor" and annot.new_coordinates:
                 # Using raw Coordinates
                 rect_tuple = (annot.new_coordinates.x0, annot.new_coordinates.y0, annot.new_coordinates.x1, annot.new_coordinates.y1)
                 new_annot = page.add_text_annot((rect_tuple[0], rect_tuple[1]), annot.comment_text)
@@ -139,6 +145,13 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                 "modDate":annot.metadata.modification_date
             })
             new_annot.update()
+
+            if is_child_reply:
+                new_parent_xref = xref_map[annot.parent_id]
+                doc.xref_set_key(new_annot.xref, "IRT", f"{new_parent_xref} 0 R")
+                doc.xref_set_key(new_annot.xref, "RT", "/R")
+
+            xref_map[annot.original_id] = new_annot.xref
 
         except Exception as e:
             print(f"Warning: Failed to inject comment '{annot.comment_text}' - {e}")

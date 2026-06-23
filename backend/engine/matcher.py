@@ -7,17 +7,22 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
     # Searches edited PDF for the semantic anchors of the orignal annotations.
     doc = fitz.open(edited_pdf_path)
     matched_results = []
+    parent_matches = {}
 
     edited_pages_text = {}
     for i in range(len(doc)):
         raw_text = doc[i].get_text("text")
         edited_pages_text[i] = " ".join(raw_text.split())
 
-    for annot in extracted_annots:
+    parents = [a for a in extracted_annots if not a.parent_id]
+    children = [a for a in extracted_annots if a.parent_id]
+
+    for annot in parents:
         # Strategy 1 Relative Geometry
         if annot.strategy == "relative_geometry":
-            matched_results.append(MatchedAnnotation(
+            matched = MatchedAnnotation(
                 original_id=annot.id,
+                parent_id=None,
                 type=annot.type,
                 confidence_score=100.0,
                 match_reason="Relative Geometric Anchor",
@@ -27,7 +32,9 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
                 new_coordinates=annot.coordinates,
                 metadata=annot.metadata,
                 comment_text=annot.comment_text
-            ))
+            )
+            matched_results.append(matched)
+            parent_matches[annot.id] = matched
             continue
 
         # Strategy 2 Semantic Text Matching
@@ -95,8 +102,9 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
             reason = "Failed to Locate Anchor"
             best_page = None 
 
-        matched_results.append(MatchedAnnotation(
+        matched = MatchedAnnotation(
             original_id=annot.id,
+            parent_id=None,
             type=annot.type,
             confidence_score=round(best_score, 2),
             match_reason=reason,
@@ -105,7 +113,79 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
             new_page=best_page,
             metadata=annot.metadata,
             comment_text=annot.comment_text
-        ))
+        )
+        matched_results.append(matched)
+        parent_matches[annot.id] = matched
+
+    # Process children
+
+    unresolved_children = children.copy()
+    previous_unresolved_count = -1
+
+    # Keep looping until all grandchildren and great-grandchildren are resolved
+    while unresolved_children and len(unresolved_children) != previous_unresolved_count:
+        previous_unresolved_count = len(unresolved_children)
+        still_unresolved = []
+
+        for annot in unresolved_children:
+            parent = parent_matches.get(annot.parent_id)
+            
+            if parent:
+                if parent.new_page is not None:
+                    # Parent passed! Piggyback on its exact location.
+                    matched = MatchedAnnotation(
+                        original_id=annot.id, 
+                        parent_id=annot.parent_id, 
+                        type="Reply Thread",
+                        confidence_score=parent.confidence_score, 
+                        match_reason=f"Inherited from Parent",
+                        anchor_text=annot.anchor_text, 
+                        context_window=annot.context_window,
+                        new_page=parent.new_page, 
+                        new_coordinates=parent.new_coordinates,
+                        metadata=annot.metadata, 
+                        comment_text=annot.comment_text
+                    )
+                else:
+                    # Parent explicitly failed, so the thread dies.
+                    matched = MatchedAnnotation(
+                        original_id=annot.id, 
+                        parent_id=annot.parent_id, 
+                        type="Reply Thread",
+                        confidence_score=0.0, 
+                        match_reason="Parent Failed",
+                        anchor_text=annot.anchor_text, 
+                        context_window=annot.context_window,
+                        new_page=None, 
+                        metadata=annot.metadata, 
+                        comment_text=annot.comment_text
+                    )
+                
+                matched_results.append(matched)
+                # THE MAGIC FIX: Save the child so its own grandchildren can find it!
+                parent_matches[annot.id] = matched 
+            else:
+                # The parent hasn't been processed yet (it is further down the list)
+                still_unresolved.append(annot)
+                
+        unresolved_children = still_unresolved
+
+    # Failsafe for orphaned children (e.g., if a root parent was completely deleted)
+    for annot in unresolved_children:
+        matched = MatchedAnnotation(
+            original_id=annot.id, 
+            parent_id=annot.parent_id, 
+            type="Reply Thread",
+            confidence_score=0.0, 
+            match_reason="Orphaned Thread (Parent Missing)",
+            anchor_text=annot.anchor_text, 
+            context_window=annot.context_window,
+            new_page=None, 
+            metadata=annot.metadata, 
+            comment_text=annot.comment_text
+        )
+        matched_results.append(matched)
+        parent_matches[annot.id] = matched
 
     doc.close()
     return matched_results

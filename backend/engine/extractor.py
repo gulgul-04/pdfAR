@@ -1,5 +1,6 @@
 import fitz
 from .config import EngineConfig
+from .schemas import ExtractedAnnotation, Coordinates, AnnotationMetadata
 
 def extract_annotations(pdf_path: str) -> list[dict]:
 
@@ -89,25 +90,25 @@ def extract_annotations(pdf_path: str) -> list[dict]:
 
                 
             #Append structure object
-            extracted_annots.append({
-                "id": str(annot.xref),
-                "parent_id": parent_id,
-                "type": EngineConfig.ANNOT_SUBTYPE_MAPPING[annot_subtype],
-                "page": page_num,
-                "strategy": anchor_strategy,
-                "coordinates": {
-                    "x0": true_rect.x0, "y0": true_rect.y0,
-                    "x1": true_rect.x1, "y1": true_rect.y1
-                },
-                "metadata": {
-                    "author": author,
-                    "creation_date": creation_date,
-                    "modification_date": mod_date
-                },
-                "anchor_text": highlighted_text,
-                "comment_text": comment_text,
-                "context_window": context_window
-            })
+            extracted_annots.append(ExtractedAnnotation(
+                id=str(annot.xref),
+                parent_id=parent_id,
+                type=EngineConfig.ANNOT_SUBTYPE_MAPPING[annot_subtype],
+                page=page_num,
+                strategy=anchor_strategy,
+                coordinates=Coordinates(
+                    x0=true_rect.x0, y0=true_rect.y0,
+                    x1=true_rect.x1, y1=true_rect.y1
+                ),
+                metadata=AnnotationMetadata(
+                    author=author,
+                    creation_date=creation_date,
+                    modification_date=mod_date
+                ),
+                anchor_text=highlighted_text,
+                comment_text=comment_text,
+                context_window=context_window
+            ))
 
     doc.close()
     return extracted_annots
