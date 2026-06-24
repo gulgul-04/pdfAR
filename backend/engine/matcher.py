@@ -42,9 +42,13 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
         best_page = -1
 
         target_search_string = annot.context_window if annot.context_window else annot.anchor_text
+        
+        orig_page = annot.page if annot.page is not None else 0
+        search_order = sorted(edited_pages_text.keys(), key=lambda p: abs(p - orig_page))
 
         # Pass 1: Exact Match
-        for page_num, page_text in edited_pages_text.items():
+        for page_num in search_order:
+            page_text = edited_pages_text[page_num]
             if target_search_string in page_text:
                 best_score = 100.0
                 best_page = page_num
@@ -52,7 +56,8 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
 
         # Pass 2: Fuzzy sliding window 
         if best_score < 100.0:
-            for page_num, page_text in edited_pages_text.items():
+            for page_num in search_order:
+                page_text = edited_pages_text[page_num]
                 if not page_text:
                     continue
 
@@ -91,6 +96,9 @@ def match_annotations(extracted_annots: list[ExtractedAnnotation], edited_pdf_pa
                 if score > best_score:
                     best_score = score
                     best_page = page_num
+
+                if best_score >= 85:
+                    break
 
 
         # Confidence Routing

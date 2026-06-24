@@ -13,6 +13,10 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
     # takes matched annotations and physically writes them into the final pdf. 
     doc = fitz.open(edited_pdf_path)
     xref_map = {}
+
+    page_blocks_cache = {}
+    page_words_cache = {}
+
     sorted_annots = sorted(matched_annots, key=lambda x: x.parent_id is not None)
 
     for annot in sorted_annots:
@@ -58,7 +62,13 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                 
                 # Spatial Fuzzy Fallback
                 else:
-                    blocks = page.get_text("blocks")
+                    if annot.new_page not in page_blocks_cache:
+                        page_blocks_cache[annot.new_page] = page.get_text("blocks")
+                        page_words_cache[annot.new_page] = page.get_text("words")
+
+                    blocks = page_blocks_cache[annot.new_page]
+                    all_words = page_words_cache[annot.new_page]
+
                     best_block = None
                     best_block_score = 0
                     # Use complete context window if available
@@ -79,7 +89,6 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
                     if best_block and best_block_score > EngineConfig.MIN_CONFIDENCE_REVIEW:
                         # Find specific word inside the block
                         block_rect = fitz.Rect(best_block[:4])
-                        all_words = page.get_text("words")
 
                         block_words = [w for w in all_words if fitz.Rect(w[:4]).intersects(block_rect)]
                         block_words.sort(key=lambda w: (w[1], w[0]))
