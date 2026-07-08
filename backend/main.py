@@ -1,8 +1,10 @@
 import os 
 import asyncio
 import html
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, status, Request
+import logging
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, status, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -12,6 +14,13 @@ from engine import file_handler, extractor, matcher, injector, schemas
 from engine.config import EngineConfig
 
 limiter = Limiter(key_func=get_remote_address)
+
+# 1. Logging Configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="PDF Annotation Restoration API",
@@ -23,7 +32,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-# 1. Security: Strict CORS Middleware
+# 2. Security: Strict CORS Middleware
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,7 +42,22 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# 2. Security: DOS Protection & Sanitization Constants
+# 3. Security: API Key Authentication
+
+API_KEY_NAME = "X-API-KEY"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
+API_SECRET_KEY = os.getenv("API_SECRET_KEY", "dev_fallback_key")
+
+async def verify_api_key(api_key_header: str = Depends(api_key_header)):
+    if api_key_header != API_SECRET_KEY:
+        logger.warning(f"Unauthorized access attempt detected.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API Key provided."
+        )
+    return api_key_header
+
+# 4. Security: DOS Protection & Sanitization Constants
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024 # 50 MB limit
 ALLOWED_MIME_TYPE = "application/pdf"
 PDF_MAGIC_BYTES = b"%PDF-"
@@ -43,6 +67,7 @@ async def validate_file(file: UploadFile, file_type_name: str):
     await file.seek(0)
 
     if header != PDF_MAGIC_BYTES:
+        logger.warning(f"Spoofed file rejected: {file.filename}")
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             details=f"Security Violation: {file_type_name} must be a valid PDF document."
@@ -54,15 +79,17 @@ async def validate_file(file: UploadFile, file_type_name: str):
     file.file.seek(0)
 
     if file_size > MAX_FILE_SIZE_BYTES:
+        logger.warning(f"Oversized payload rejected: {file_size} bytes")
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"Security Violation: {file_type_name} exceeds the 50MB payload limit."
         )
     
-# 3. Utility and Background Tasks
+# 5. Utility and Background Tasks
 async def schedule_cleanup(job_dir: str, delay_seconds: int):
     await asyncio.sleep(delay_seconds)
     file_handler.cleanup_workspace(job_dir)
+    logger.info(f"Ephemeral workspace {job_dir} destroyed")
 
 # 4. Core Processing Endpoint
 @app.post("/api/v1/process-pdfs", response_model=schemas.ProcessPDFResponse)
@@ -70,9 +97,12 @@ async def schedule_cleanup(job_dir: str, delay_seconds: int):
 async def process_pdfs(
     request: Request,
     background_tasks: BackgroundTasks, 
+    api_key: str = Depends(verify_api_key),
     original_pdf: UploadFile = File(...),
     edited_pdf: UploadFile = File(...)
 ):
+    logger.info("New processing request received.")
+    
     # Step 1: Security sanitization
     await validate_file(original_pdf, "Original PDF")
     await validate_file(edited_pdf, "Edited PDF")
@@ -94,13 +124,22 @@ async def process_pdfs(
         doc = fitz.open(orig_path)
         if len(doc) > 500:
             doc.close()
+            logger.warning(f"Document rejected: Exceeded page limit ({len(doc)} pages).")
             raise ValueError("Document exceeds the maximum allowed length of 500 pages.")
         doc.close()
 
         # Step 4: Execute Engine Pipeline
         extracted_annots = extractor.extract_annotations(orig_path)
 
+        if len(extracted_annots) > EngineConfig.MAX_ANNOTATIONS_PER_FILE:
+            logger.warning(f"Job {job_id} aborted: Algorithmic complexity limit exceeded ({len(extracted_annots)} annotations).")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Document contains too many comments ({len(extracted_annots)}). The limit is {EngineConfig.MAX_ANNOTATIONS_PER_FILE}."
+            )
+
         if not extracted_annots:
+            logger.info(f"Job {job_id} completed: 0 annotations found.")
             return schemas.ProcessPDFResponse(
                 status="success",
                 message="No annotations found in the original document.",
@@ -129,6 +168,8 @@ async def process_pdfs(
             else:
                 review_queue.append(annot)
 
+        logger.info(f"Job {job_id} successful. Auto: {len(auto_injected)}, Review: {len(review_queue)}.")
+
         return schemas.ProcessPDFResponse(
             status="success",
             message="Processing complete.",
@@ -141,9 +182,15 @@ async def process_pdfs(
         )
     
     except Exception as e:
+        logger.error(f"Critical Engine Error on Job {job_id}: {str(e)}", exc_info=True)
         # If the engine crashes, trigger an immediate wipe to protect data
         file_handler.cleanup_workspace(job_dir)
+
+        if isinstance(e, HTTPException):
+            raise e
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred during engine execution: {str(e)}"
         )
+    

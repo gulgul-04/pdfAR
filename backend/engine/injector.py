@@ -2,7 +2,10 @@ import fitz
 from rapidfuzz import fuzz
 from .schemas import MatchedAnnotation
 import re
+import logging
 from .config import EngineConfig
+
+logger = logging.getLogger(__name__)
 
 def clean_str(text: str) -> str:
     cleaned = re.sub(r'[^\w\s]', '', text).strip().lower()
@@ -163,7 +166,7 @@ def inject_annotations(matched_annots: list[MatchedAnnotation], edited_pdf_path:
             xref_map[annot.original_id] = new_annot.xref
 
         except Exception as e:
-            print(f"Warning: Failed to inject comment '{annot.comment_text}' - {e}")
+            logger.warning(f"Failed to inject comment '{annot.comment_text}' - {e}")
             continue
 
     doc.save(output_path)

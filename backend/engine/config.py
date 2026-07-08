@@ -9,6 +9,7 @@ class EngineConfig:
     # 1. ENVIRONMENT AND SECURITY CONFIGURATIONS
     ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "https://localhost:5173").split(",")
     API_RATE_LIMIT = os.getenv("API_RATE_LIMIT", "5/minute")
+    MAX_ANNOTATIONS_PER_FILE = int(os.getenv("MAX_ANNOTATIONS_PER_FILE", "1000"))
 
     # 2. FILE & DIRECTORY CONFIGURATIONS
     TEMP_WORKSPACE_DIR = "temp_jobs"
