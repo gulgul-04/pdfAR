@@ -17,7 +17,14 @@ export const processPDFs = async (originalFile, editedFile) => {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Server Error: ${response.status}`);
+      let errorMessage = `Server Error: ${response.status}`;
+      if (Array.isArray(errorData.detail)) {
+        errorMessage = JSON.stringify(errorData.detail[0]); // Grabs the first specific error
+      } else if (errorData.detail) {
+        errorMessage = errorData.detail;
+      }
+      
+      throw new Error(errorMessage);
     }
 
     return await response.json();
@@ -26,4 +33,19 @@ export const processPDFs = async (originalFile, editedFile) => {
     console.error("API Pipeline Error:", error.message);
     throw error;
   }
+};
+
+export const fetchPDFBlob = async (jobId) => {
+  const response = await fetch(`${BACKEND_URL}/api/v1/download/${jobId}`, {
+    method: "GET",
+    headers: {
+      "X-API-Key": API_KEY, 
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to retrieve file. The secure 15-minute window may have expired.");
+  }
+
+  return await response.blob(); 
 };

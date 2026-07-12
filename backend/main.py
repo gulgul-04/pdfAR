@@ -5,6 +5,7 @@ import logging
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, status, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
+from fastapi.responses import FileResponse
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -92,6 +93,27 @@ async def schedule_cleanup(job_dir: str, delay_seconds: int):
     logger.info(f"Ephemeral workspace {job_dir} destroyed")
 
 # 4. Core Processing Endpoint
+@app.post("/api/v1/download-pdf/{job_id}")
+@limiter.limit(EngineConfig.API_RATE_LIMIT)
+
+async def download_pdf(request: Request, job_id: str, api_key: str = Depends(verify_api_key)):
+    temp_dir = os.path.abspath("temp_jobs")
+    job_dir = os.path.join(temp_dir, job_id)
+    final_path = os.path.join(job_dir, EngineConfig.FINAL_PDF_FILENAME)
+    
+    if not os.path.exists(final_path):
+        logger.warning(f"Download attempted for expired or missing job: {job_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File expired or not found. The 15-minute secure window may have closed."
+        )
+        
+    return FileResponse(
+        path=final_path, 
+        filename=f"Restored_Annotations_{job_id[:8]}.pdf", 
+        media_type="application/pdf"
+    )
+
 @app.post("/api/v1/process-pdfs", response_model=schemas.ProcessPDFResponse)
 @limiter.limit(EngineConfig.API_RATE_LIMIT)
 async def process_pdfs(

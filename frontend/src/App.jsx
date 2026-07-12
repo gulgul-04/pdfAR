@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
-import { processPDFs } from './services/api';
+import { processPDFs, fetchPDFBlob } from './services/api';
 
 function App() {
-  // =========================================================================
-  // 1. STATE DEFINITIONS
-  // =========================================================================
   const [scrollProgress, setScrollProgress] = useState(0);
-  
-  // App Router State: 'landing' | 'tool' | 'contact'
   const [appState, setAppState] = useState('landing'); 
-  
   const [isProcessing, setIsProcessing] = useState(false);
+  const [originalFile, setOriginalFile] = useState(null);
+  const [editedFile, setEditedFile] = useState(null);
+  const [status, setStatus] = useState('Idle');
+  const [results, setResults] = useState(null);
+  const [isReviewMode, setIsReviewMode] = useState(false); 
+
+  // --- NEW: Smart Loading State Variables ---
   const loadingPhrases = [
     "Extracting native dictionary links...",
     "Calculating file geometry...",
@@ -20,26 +21,16 @@ function App() {
     "Finalizing document structure..."
   ];
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
-  const [isReviewMode, setIsReviewMode] = useState(false); // Prepping for the next phase
-  const [originalFile, setOriginalFile] = useState(null);
-  const [editedFile, setEditedFile] = useState(null);
-  const [status, setStatus] = useState('Idle');
-  const [results, setResults] = useState(null);
+  const [simulatedProgress, setSimulatedProgress] = useState(0);
 
-  // =========================================================================
-  // 2. USE EFFECTS (Hooks)
-  // =========================================================================
-  
   // Navbar Morphing Scroll Logic
   useEffect(() => {
     if (appState !== 'landing') return;
-
     const handleScroll = () => {
       const maxScroll = 350; 
       const progress = Math.min(Math.max(window.scrollY / maxScroll, 0), 1);
       setScrollProgress(progress);
     };
-
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, [appState]);
@@ -47,7 +38,6 @@ function App() {
   // Tile & Title Animation Observer
   useEffect(() => {
     if (appState !== 'landing') return;
-
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
@@ -59,35 +49,38 @@ function App() {
 
     const hiddenElements = document.querySelectorAll('.reveal-on-scroll');
     hiddenElements.forEach((el) => observer.observe(el));
-
     return () => observer.disconnect();
   }, [appState]);
 
-  // Dynamic Loading Text Cycler
+  // --- NEW: Smart Progress Bar & Text Cycler ---
   useEffect(() => {
-    let interval;
-    if (isProcessing) {
-      interval = setInterval(() => {
-        setLoadingTextIndex((prev) => (prev + 1) % loadingPhrases.length);
-      }, 1500);
-    } else {
+    if (!isProcessing) {
+      setSimulatedProgress(0);
       setLoadingTextIndex(0);
+      return;
     }
-    return () => clearInterval(interval);
+
+    // Trickles the progress bar up to 95%
+    const progressInterval = setInterval(() => {
+      setSimulatedProgress(old => (old >= 95 ? 95 : old + Math.random() * 8));
+    }, 500);
+
+    // Cycles the text but locks onto the final phrase
+    const textInterval = setInterval(() => {
+      setLoadingTextIndex(prev => Math.min(prev + 1, loadingPhrases.length - 1));
+    }, 1500);
+
+    return () => {
+      clearInterval(progressInterval);
+      clearInterval(textInterval);
+    };
   }, [isProcessing, loadingPhrases.length]);
-  
-  // =========================================================================
-  // 3. HANDLER FUNCTIONS
-  // =========================================================================
-  
-  // Navigation Bar Handlers
+
+  // Navigation Handlers
   const scrollToSection = (id) => {
     if (appState !== 'landing') {
       setAppState('landing');
-      // Wait for React to render the landing page, then scroll
-      setTimeout(() => {
-        document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
-      }, 50);
+      setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' }), 50);
     } else {
       document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
     }
@@ -96,14 +89,13 @@ function App() {
   const scrollToTop = () => {
     if (appState !== 'landing') {
       setAppState('landing');
-      setTimeout(() => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }, 50);
+      setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
     } else {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
+  // --- NEW: Execution Logic for Smart Loading ---
   const handleRunPipeline = async () => {
     if (!originalFile || !editedFile) {
       alert("Please select both PDFs first.");
@@ -112,11 +104,15 @@ function App() {
     setIsProcessing(true);
     setStatus('Processing...');
     setResults(null);
-
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    setIsReviewMode(false); 
 
     try {
       const data = await processPDFs(originalFile, editedFile);
+      
+      // Force bar to 100% and delay a moment so the user sees it finish!
+      setSimulatedProgress(100);
+      await new Promise(resolve => setTimeout(resolve, 600));
+
       setStatus('Success! All threads restored.');
       setResults(data);
     } catch (error) {
@@ -126,8 +122,30 @@ function App() {
     }
   };
 
+  // --- NEW: Download / Preview Handler ---
+  const handleDocumentAction = async (actionType) => {
+    try {
+      const blob = await fetchPDFBlob(results.download_token);
+      const url = window.URL.createObjectURL(blob);
+      
+      if (actionType === 'download') {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Restored_Annotations.pdf`;
+        a.click();
+      } else if (actionType === 'preview') {
+        // Opens the browser's native PDF viewer in a new tab
+        window.open(url, '_blank');
+      }
+      
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000); // Cleanup memory
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
   // =========================================================================
-  // 4. RENDER: TOOL DASHBOARD
+  // RENDER: TOOL DASHBOARD
   // =========================================================================
   if (appState === 'tool') {
     return (
@@ -166,16 +184,18 @@ function App() {
             <div className="mt-8 p-8 border border-gray-100 rounded-2xl bg-gray-50 shadow-inner">
               <div className="flex justify-between items-center mb-4">
                 <span className="text-sm font-bold text-[#ED2224] animate-pulse">ENGINE ACTIVE</span>
-                <span className="text-xs text-gray-400 font-mono">Running Phase {loadingTextIndex + 1}/6</span>
+                <span className="text-xs text-gray-400 font-mono">
+                  {simulatedProgress === 100 ? 'Complete' : `Phase ${loadingTextIndex + 1}/6`}
+                </span>
               </div>
               <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden mb-6">
                 <div 
-                  className="h-full bg-[#ED2224] transition-all duration-500 ease-out"
-                  style={{ width: `${((loadingTextIndex + 1) / loadingPhrases.length) * 100}%` }}
+                  className="h-full bg-[#ED2224] transition-all duration-300 ease-out"
+                  style={{ width: `${simulatedProgress}%` }}
                 ></div>
               </div>
               <p className="text-gray-600 font-medium text-center h-6 transition-opacity">
-                {loadingPhrases[loadingTextIndex]}
+                {simulatedProgress === 100 ? "Restoration successful." : loadingPhrases[loadingTextIndex]}
               </p>
             </div>
           )}
@@ -211,7 +231,6 @@ function App() {
                 </div>
               </div>
 
-              {/* DYNAMIC ACTION BUTTON */}
               {results.needs_review > 0 ? (
                 <button 
                   onClick={() => setIsReviewMode(true)}
@@ -220,12 +239,21 @@ function App() {
                   Proceed to Manual Review ({results.needs_review} Items)
                 </button>
               ) : (
-                <button 
-                  className="w-full py-4 bg-emerald-500 text-white rounded-xl font-bold text-lg hover:bg-emerald-600 transition-colors shadow-md flex justify-center items-center cursor-pointer"
-                >
-                  <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                  Download Restored PDF
-                </button>
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => handleDocumentAction('preview')}
+                    className="w-full py-4 bg-gray-900 text-white rounded-xl font-bold text-lg hover:bg-gray-800 transition-colors shadow-md flex justify-center items-center cursor-pointer"
+                  >
+                    Preview Document
+                  </button>
+                  <button 
+                    onClick={() => handleDocumentAction('download')}
+                    className="w-full py-4 bg-emerald-500 text-white rounded-xl font-bold text-lg hover:bg-emerald-600 transition-colors shadow-md flex justify-center items-center cursor-pointer"
+                  >
+                    <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Download PDF
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -234,8 +262,8 @@ function App() {
     );
   }
 
-  /// =========================================================================
-  // 5. RENDER: CONTACT US PAGE
+  // =========================================================================
+  // RENDER: CONTACT US PAGE
   // =========================================================================
   if (appState === 'contact') {
     return (
@@ -252,7 +280,6 @@ function App() {
             <h1 className="text-4xl font-extrabold text-gray-900 mb-4">Get in Touch</h1>
             <p className="text-lg text-gray-500 mb-6">Have questions about our enterprise pipeline? We're here to help.</p>
             
-            {/* DIRECT EMAIL BADGE */}
             <div className="inline-flex items-center justify-center space-x-2 bg-red-50 px-6 py-3 rounded-full border border-red-100 text-red-700 font-medium hover:bg-red-100 transition-colors cursor-pointer shadow-sm">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
@@ -297,7 +324,7 @@ function App() {
   }
 
   // =========================================================================
-  // 6. RENDER: DYNAMIC LANDING PAGE
+  // RENDER: DYNAMIC LANDING PAGE
   // =========================================================================
   return (
     <div 
@@ -307,10 +334,8 @@ function App() {
         '--shadow-val': scrollProgress > 0 ? '0 10px 25px -5px rgba(0, 0, 0, 0.1)' : '0 20px 25px -5px rgba(0, 0, 0, 0.2)'
       }}
     >
-      {/* Morphing Navigation Bar */}
       <div className="morph-nav-container">
         
-        {/* FIXED: The pointerEvents toggle disables the invisible overlay from stealing clicks! */}
         <div 
           onClick={() => setAppState('tool')}
           style={{ 
@@ -331,14 +356,12 @@ function App() {
         >
           <div onClick={scrollToTop} className="font-bold text-xl tracking-wider cursor-pointer pl-2 hover:opacity-80 transition-opacity">PDF<span className="font-light">AR</span></div>
           
-          {/* UPDATED: Buttons now have interactive hover backgrounds and transitions */}
           <div className="flex space-x-2 text-sm font-medium items-center">
             <button onClick={scrollToTop} className="px-4 py-2 rounded-lg hover:bg-white/15 hover:text-red-50 transition-all cursor-pointer">Home</button>
             <button onClick={() => scrollToSection('how-it-works')} className="px-4 py-2 rounded-lg hover:bg-white/15 hover:text-red-50 transition-all cursor-pointer">How it Works</button>
             <button onClick={() => scrollToSection('input-requirements')} className="px-4 py-2 rounded-lg hover:bg-white/15 hover:text-red-50 transition-all cursor-pointer">Qualifications</button>
             <button onClick={() => scrollToSection('terms-conditions')} className="px-4 py-2 rounded-lg hover:bg-white/15 hover:text-red-50 transition-all cursor-pointer">Terms</button>
             
-            {/* NEW: Contact Us Route Button */}
             <button onClick={() => setAppState('contact')} className="px-4 py-2 rounded-lg hover:bg-white/15 hover:text-red-50 transition-all cursor-pointer mr-2">Contact Us</button>
             
             <button 
@@ -351,7 +374,6 @@ function App() {
         </div>
       </div>
 
-      {/* HERO SECTION */}
       <div className="h-[95vh] flex flex-col justify-between pt-24 pb-48 text-center px-4 max-w-4xl mx-auto">
         <div className="landing-hero-heading">
           <h1 className="text-6xl font-extrabold text-gray-900 tracking-tight mb-6">
@@ -368,10 +390,8 @@ function App() {
         </div>
       </div>
 
-      {/* DETAILED INFORMATION CONTENT AREAS */}
       <div className="max-w-5xl mx-auto px-8 pb-32 space-y-16">
         
-        {/* Anchored Section 1: How it works */}
         <div id="how-it-works" className="bg-white rounded-3xl p-12 shadow-xl border border-gray-100 scroll-mt-24">
           <h2 className="reveal-on-scroll opacity-0 translate-y-12 transition-all duration-700 ease-out text-3xl font-bold text-gray-900 mb-6">
             Intelligent Annotation Relocation
@@ -400,7 +420,6 @@ function App() {
           </div>
         </div>
 
-        {/* Anchored Section 2: Input Qualifications & Server Limits */}
         <div id="input-requirements" className="grid grid-cols-2 gap-12 scroll-mt-24">
           <div className="reveal-on-scroll opacity-0 translate-y-12 transition-all duration-700 ease-out">
             <h2 className="text-3xl font-bold text-gray-900 mb-6">Input Matrix Qualifications</h2>
@@ -439,7 +458,6 @@ function App() {
           </div>
         </div>
 
-        {/* Anchored Section 3: Terms & Conditions Disclaimer */}
         <div id="terms-conditions" className="reveal-on-scroll opacity-0 translate-y-12 transition-all duration-700 ease-out bg-white rounded-3xl p-12 shadow-md border border-gray-100 scroll-mt-24">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Terms & Local Sandbox Framework</h2>
           <p className="text-sm text-gray-500 leading-relaxed delay-100 transition-opacity">
