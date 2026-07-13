@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { processPDFs, fetchPDFBlob } from './services/api';
+import ReviewMode from './ReviewMode';
 
 function App() {
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -154,7 +155,7 @@ function App() {
           onClick={scrollToTop}
           className="mb-8 text-sm font-semibold text-gray-500 hover:text-gray-800 transition-colors cursor-pointer flex items-center"
         >
-          <span className="mr-2">←</span> Back to Landing Page
+          <span className="mr-2">←</span> Back to Home Page
         </button>
         
         <div className="max-w-4xl mx-auto bg-white p-10 rounded-2xl shadow-xl border border-gray-100">
@@ -206,56 +207,68 @@ function App() {
             </h3>
           )}
 
-          {results && !isProcessing && !isReviewMode && (
-            <div className="mt-8 animate-fade-in">
-              <h3 className="text-xl font-bold text-gray-900 mb-6 border-b pb-4">Pipeline Diagnostics</h3>
-              
-              <div className="grid grid-cols-4 gap-4 mb-8">
-                <div className="p-4 bg-gray-50 border border-gray-100 rounded-xl text-center">
-                  <div className="text-3xl font-black text-gray-800">{results.total_annotations_found}</div>
-                  <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mt-1">Found</div>
-                </div>
-                <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl text-center">
-                  <div className="text-3xl font-black text-emerald-600">{results.successful_matches}</div>
-                  <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider mt-1">Auto-Injected</div>
-                </div>
-                <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl text-center">
-                  <div className="text-3xl font-black text-amber-600">{results.needs_review}</div>
-                  <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mt-1">Need Review</div>
-                </div>
-                <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-center">
-                  <div className="text-3xl font-black text-red-600">
-                    {results.total_annotations_found - results.successful_matches - results.needs_review}
-                  </div>
-                  <div className="text-xs font-bold text-red-700 uppercase tracking-wider mt-1">Failed</div>
-                </div>
+          {/* RESULTS DASHBOARD & REVIEW SWITCH */}
+          {results && !isProcessing && (
+            isReviewMode ? (
+              // This completely takes over the screen when activated
+              <div className="fixed inset-0 z-50">
+                 <ReviewMode 
+                    jobId={results.download_token} 
+                    initialQueue={results.review_queue}
+                    onComplete={() => setIsReviewMode(false)}
+                 />
               </div>
-
-              {results.needs_review > 0 ? (
-                <button 
-                  onClick={() => setIsReviewMode(true)}
-                  className="w-full py-4 bg-amber-500 text-white rounded-xl font-bold text-lg hover:bg-amber-600 transition-colors shadow-md cursor-pointer"
-                >
-                  Proceed to Manual Review ({results.needs_review} Items)
-                </button>
-              ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  <button 
-                    onClick={() => handleDocumentAction('preview')}
-                    className="w-full py-4 bg-gray-900 text-white rounded-xl font-bold text-lg hover:bg-gray-800 transition-colors shadow-md flex justify-center items-center cursor-pointer"
-                  >
-                    Preview Document
-                  </button>
-                  <button 
-                    onClick={() => handleDocumentAction('download')}
-                    className="w-full py-4 bg-emerald-500 text-white rounded-xl font-bold text-lg hover:bg-emerald-600 transition-colors shadow-md flex justify-center items-center cursor-pointer"
-                  >
-                    <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                    Download PDF
-                  </button>
+            ) : (
+              <div className="mt-8 animate-fade-in">
+                <h3 className="text-xl font-bold text-gray-900 mb-6 border-b pb-4">Pipeline Diagnostics</h3>
+                
+                <div className="grid grid-cols-4 gap-4 mb-8">
+                  <div className="p-4 bg-gray-50 border border-gray-100 rounded-xl text-center">
+                    <div className="text-3xl font-black text-gray-800">{results.total_annotations_found}</div>
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mt-1">Found</div>
+                  </div>
+                  <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl text-center">
+                    <div className="text-3xl font-black text-emerald-600">{results.successful_matches}</div>
+                    <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider mt-1">Auto-Injected</div>
+                  </div>
+                  <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl text-center">
+                    <div className="text-3xl font-black text-amber-600">{results.needs_review}</div>
+                    <div className="text-xs font-bold text-amber-700 uppercase tracking-wider mt-1">Need Review</div>
+                  </div>
+                  <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-center">
+                    <div className="text-3xl font-black text-red-600">
+                      {results.total_annotations_found - results.successful_matches - results.needs_review}
+                    </div>
+                    <div className="text-xs font-bold text-red-700 uppercase tracking-wider mt-1">Failed</div>
+                  </div>
                 </div>
-              )}
-            </div>
+  
+                {results.needs_review > 0 ? (
+                  <button 
+                    onClick={() => setIsReviewMode(true)}
+                    className="w-full py-4 bg-amber-500 text-white rounded-xl font-bold text-lg hover:bg-amber-600 transition-colors shadow-md cursor-pointer"
+                  >
+                    Proceed to Manual Review ({results.needs_review} Items)
+                  </button>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={() => handleDocumentAction('preview')}
+                      className="w-full py-4 bg-gray-900 text-white rounded-xl font-bold text-lg hover:bg-gray-800 transition-colors shadow-md flex justify-center items-center cursor-pointer"
+                    >
+                      Preview Document
+                    </button>
+                    <button 
+                      onClick={() => handleDocumentAction('download')}
+                      className="w-full py-4 bg-emerald-500 text-white rounded-xl font-bold text-lg hover:bg-emerald-600 transition-colors shadow-md flex justify-center items-center cursor-pointer"
+                    >
+                      <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                      Download PDF
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
           )}
         </div>
       </div>
@@ -272,7 +285,7 @@ function App() {
           onClick={scrollToTop}
           className="mb-8 text-sm font-semibold text-gray-500 hover:text-gray-800 transition-colors cursor-pointer flex items-center"
         >
-          <span className="mr-2">←</span> Back to Landing Page
+          <span className="mr-2">←</span> Back to Home Page
         </button>
 
         <div className="max-w-3xl mx-auto">
@@ -381,7 +394,7 @@ function App() {
             <span className="text-[#ED2224]">Enterprise Documents.</span>
           </h1>
           <p className="text-xl text-gray-500 max-w-2xl mx-auto">
-            Port deep annotation histories from draft versions onto clean, modern engineering templates instantly.
+            Import comments and annotations from previous draft PDFs into newer edited files while preserving their integrity, structure, and context.
           </p>
         </div>
         

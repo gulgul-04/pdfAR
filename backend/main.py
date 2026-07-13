@@ -114,6 +114,91 @@ async def download_pdf(request: Request, job_id: str, api_key: str = Depends(ver
         media_type="application/pdf"
     )
 
+@app.get("/api/v1/preview/{job_id}")
+@limiter.limit(EngineConfig.API_RATE_LIMIT)
+async def preview_pdf(request: Request, job_id: str, api_key: str = Depends(verify_api_key)):
+    """Serves the PDF with an 'inline' disposition so browsers render it directly."""
+    temp_dir = os.path.abspath("temp_jobs")
+    job_dir = os.path.join(temp_dir, job_id)
+    final_path = os.path.join(job_dir, EngineConfig.FINAL_PDF_FILENAME)
+    
+    if not os.path.exists(final_path):
+        logger.warning(f"Preview attempted for expired job: {job_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File expired or not found. The secure window has closed."
+        )
+        
+    return FileResponse(
+        path=final_path, 
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="Preview_{job_id[:8]}.pdf"'}
+    )
+
+@app.post("/api/v1/inject-manual")
+@limiter.limit(EngineConfig.API_RATE_LIMIT)
+async def inject_manual(
+    request: Request, 
+    payload: schemas.ManualInjectionRequest, 
+    api_key: str = Depends(verify_api_key)
+):
+    """Takes frontend coordinate mapping and physically draws missed annotations."""
+    temp_dir = os.path.abspath("temp_jobs")
+    job_dir = os.path.join(temp_dir, payload.job_id)
+    final_path = os.path.join(job_dir, EngineConfig.FINAL_PDF_FILENAME)
+
+    if not os.path.exists(final_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Job workspace has expired."
+        )
+
+    try:
+        import fitz  # PyMuPDF
+        
+        # Open the currently compiling final document
+        doc = fitz.open(final_path)
+        
+        # Ensure the page exists
+        if payload.page_number >= len(doc):
+            doc.close()
+            raise ValueError("Page number out of bounds.")
+            
+        page = doc[payload.page_number]
+        
+        # Convert frontend HTML coordinate dictionary to PDF Points
+        rect = fitz.Rect(
+            payload.rect.get("x0"), 
+            payload.rect.get("y0"), 
+            payload.rect.get("x1"), 
+            payload.rect.get("y1")
+        )
+        
+        # Draw the physical annotation
+        if payload.annot_type.lower() == "highlight":
+            annot = page.add_highlight_annot(rect)
+            annot.set_info({"content": payload.comment_text, "title": payload.author})
+            annot.update()
+        else:
+            # Fallback to standard Text (Sticky Note) annotation
+            annot = page.add_text_annot(rect.tl, payload.comment_text)
+            annot.set_info({"title": payload.author})
+            annot.update()
+
+        # Save incrementally for performance (only rewrites the changed bytes)
+        doc.saveIncr()
+        doc.close()
+
+        logger.info(f"Manual annotation injected on page {payload.page_number} for job {payload.job_id}")
+        return {"status": "success", "message": "Annotation physically bound to document."}
+
+    except Exception as e:
+        logger.error(f"Manual injection failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to draw annotation: {str(e)}"
+        )
+
 @app.post("/api/v1/process-pdfs", response_model=schemas.ProcessPDFResponse)
 @limiter.limit(EngineConfig.API_RATE_LIMIT)
 async def process_pdfs(

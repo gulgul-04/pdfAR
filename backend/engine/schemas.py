@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 # Base Components
 class Coordinates(BaseModel):
@@ -54,3 +54,11 @@ class ProcessPDFResponse(BaseModel):
     review_queue: List[MatchedAnnotation]
 
     download_token: Optional[str] = None 
+
+class ManualInjectionRequest(BaseModel):
+    job_id: str
+    page_number: int
+    rect: Dict[str, float]  
+    comment_text: str
+    author: Optional[str] = "Manual Reviewer"
+    annot_type: Optional[str] = "Highlight"
